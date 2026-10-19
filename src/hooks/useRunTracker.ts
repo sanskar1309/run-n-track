@@ -1,3 +1,4 @@
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { AppState } from 'react-native';
@@ -20,6 +21,9 @@ const WATCH_OPTIONS: Location.LocationOptions = {
   timeInterval: 1000,
 };
 
+const KEEP_AWAKE_TAG = 'run-tracker';
+const SERVICES_OFF_ERROR = 'Turn on location services to record a run.';
+
 function toPermissionState(res: Location.LocationPermissionResponse): PermissionState {
   if (res.granted) return 'granted';
   return res.canAskAgain ? 'undetermined' : 'denied';
@@ -29,18 +33,25 @@ export function useRunTracker() {
   const [state, dispatch] = useReducer(trackerReducer, initialTrackerState);
   const [permission, setPermission] = useState<PermissionState>('checking');
   const [currentLocation, setCurrentLocation] = useState<LatLng | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // null until checked; re-checked whenever the app comes back to the foreground.
+  const [servicesOn, setServicesOn] = useState<boolean | null>(null);
+  const [watchError, setWatchError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   // Latest state for finish(), so a double tap can't build the same run twice.
   const stateRef = useRef(state);
+  const finishingRef = useRef(false);
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
 
-  // Check permission on mount, and again when the user comes back from Settings.
+  // Check permission and location services on mount, and again when the user comes back
+  // from Settings or the quick-settings shade.
   useEffect(() => {
-    const check = () => Location.getForegroundPermissionsAsync().then((res) => setPermission(toPermissionState(res)));
+    const check = () => {
+      Location.getForegroundPermissionsAsync().then((res) => setPermission(toPermissionState(res)));
+      Location.hasServicesEnabledAsync().then(setServicesOn);
+    };
     check();
     const sub = AppState.addEventListener('change', (appState) => {
       if (appState === 'active') check();
@@ -48,42 +59,44 @@ export function useRunTracker() {
     return () => sub.remove();
   }, []);
 
-  // Follow the user's position whenever we're allowed to.
+  // Follow the user's position whenever we're allowed to and location services are on.
   useEffect(() => {
-    if (permission !== 'granted') return;
+    if (permission !== 'granted' || servicesOn !== true) return;
     let subscription: Location.LocationSubscription | null = null;
     let cancelled = false;
 
-    (async () => {
-      if (!(await Location.hasServicesEnabledAsync())) {
-        setError('Turn on location services to record a run.');
-        return;
-      }
-      const sub = await Location.watchPositionAsync(
-        WATCH_OPTIONS,
-        ({ coords, timestamp }) => {
-          const point: RoutePoint = { lat: coords.latitude, lng: coords.longitude, t: timestamp };
-          setError(null);
-          setCurrentLocation(point);
-          dispatch({ type: 'location', point, accuracyM: coords.accuracy });
-        },
-        (reason) => setError(`Location error: ${reason}`),
-      );
-      if (cancelled) sub.remove();
-      else subscription = sub;
-    })().catch(() => setError('Could not start location updates.'));
+    Location.watchPositionAsync(
+      WATCH_OPTIONS,
+      ({ coords, timestamp }) => {
+        const point: RoutePoint = { lat: coords.latitude, lng: coords.longitude, t: timestamp };
+        setWatchError(null);
+        setCurrentLocation(point);
+        dispatch({ type: 'location', point, accuracyM: coords.accuracy });
+      },
+      (reason) => setWatchError(`Location error: ${reason}`),
+    )
+      .then((sub) => {
+        if (cancelled) sub.remove();
+        else subscription = sub;
+      })
+      .catch(() => setWatchError('Could not start location updates.'));
 
     return () => {
       cancelled = true;
       subscription?.remove();
     };
-  }, [permission]);
+  }, [permission, servicesOn]);
 
   // Re-render every second while running; the time itself comes from timestamps.
+  // Also keep the screen on: a locked screen stops foreground GPS updates (background tracking is Phase 3).
   useEffect(() => {
     if (state.status !== 'running') return;
     const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
+    activateKeepAwakeAsync(KEEP_AWAKE_TAG);
+    return () => {
+      clearInterval(id);
+      deactivateKeepAwake(KEEP_AWAKE_TAG);
+    };
   }, [state.status]);
 
   const requestPermission = useCallback(async () => {
@@ -96,14 +109,25 @@ export function useRunTracker() {
     dispatch({ type, now: t });
   }, []);
 
-  /** Ends a paused run and returns it (not yet saved). Returns null if there's no paused run. */
-  const finish = useCallback((): Run | null => {
+  /**
+   * Ends a paused run by passing it to `save`. The run is only cleared once `save` succeeds;
+   * if it throws, the run stays paused so the user can retry. Returns null if there's nothing
+   * to finish (not paused, or a finish is already in progress).
+   */
+  const finish = useCallback(async (save: (run: Run) => Promise<void>): Promise<Run | null> => {
     const current = stateRef.current;
-    if (current.status !== 'paused') return null;
-    stateRef.current = initialTrackerState;
-    dispatch({ type: 'reset' });
-    const t = Date.now();
-    return toRun(current, t, t.toString(36));
+    if (current.status !== 'paused' || finishingRef.current) return null;
+    finishingRef.current = true;
+    try {
+      const t = Date.now();
+      const run = toRun(current, t, t.toString(36));
+      await save(run);
+      stateRef.current = initialTrackerState;
+      dispatch({ type: 'reset' });
+      return run;
+    } finally {
+      finishingRef.current = false;
+    }
   }, []);
 
   const discard = useCallback(() => dispatch({ type: 'reset' }), []);
@@ -115,7 +139,7 @@ export function useRunTracker() {
     route: state.route,
     currentLocation,
     permission,
-    error,
+    error: permission === 'granted' && servicesOn === false ? SERVICES_OFF_ERROR : watchError,
     requestPermission,
     start: () => act('start'),
     pause: () => act('pause'),

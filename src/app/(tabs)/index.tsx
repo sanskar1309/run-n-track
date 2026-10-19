@@ -51,14 +51,13 @@ function Recorder() {
       ]);
       return;
     }
-    const run = tracker.finish();
-    if (!run) return;
     setSaving(true);
     try {
-      await saveRun(run);
-      router.push({ pathname: '/run/[id]', params: { id: run.id } });
+      const run = await tracker.finish(saveRun);
+      if (run) router.push({ pathname: '/run/[id]', params: { id: run.id } });
     } catch {
-      Alert.alert('Could not save run', 'Please try again.');
+      // The run is still paused, so tapping Finish again retries the save.
+      Alert.alert('Could not save run', 'Your run is still here. Tap Finish to try again.');
     } finally {
       setSaving(false);
     }
