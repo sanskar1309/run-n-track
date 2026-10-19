@@ -10,3 +10,6 @@ export type Run = {
   distanceM: number;
   route: RoutePoint[];
 };
+
+/** What the History list needs: a Run without its (large) route. */
+export type RunSummary = Omit<Run, 'route'>;

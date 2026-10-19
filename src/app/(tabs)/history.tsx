@@ -5,10 +5,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { formatDistanceKm, formatDuration, formatPace } from '@/lib/format';
 import { listRuns } from '@/lib/runStorage';
-import type { Run } from '@/lib/types';
+import type { RunSummary } from '@/lib/types';
 
 export default function HistoryScreen() {
-  const [runs, setRuns] = useState<Run[]>([]);
+  const [runs, setRuns] = useState<RunSummary[]>([]);
 
   // Tabs stay mounted, so reload every time this tab comes into focus (e.g. after finishing a run).
   useFocusEffect(
@@ -32,7 +32,7 @@ export default function HistoryScreen() {
   );
 }
 
-function RunRow({ run }: { run: Run }) {
+function RunRow({ run }: { run: RunSummary }) {
   const date = new Date(run.startedAt);
   return (
     <Link href={{ pathname: '/run/[id]', params: { id: run.id } }} asChild>
