@@ -3,12 +3,15 @@ import type { LatLng, RoutePoint } from './types';
 /**
  * A self-contained Leaflet page rendered inside a WebView on Android.
  * Needed because Expo Go on Android ships an expired Google Maps key (expo/expo#49323).
- * Tiles: CARTO basemaps of OpenStreetMap data — free, no API key.
+ * Tiles: OpenStreetMap's standard tile server — free, no API key, fine for light personal use
+ * (https://operations.osmfoundation.org/policies/tiles/). Requires attribution and a Referer.
  */
 export const LEAFLET_HTML = `<!DOCTYPE html>
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<!-- OSM tile servers block requests without a Referer; the WebView's baseUrl provides one. -->
+<meta name="referrer" content="strict-origin-when-cross-origin" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>html, body, #map { margin: 0; height: 100%; background: #e5e3df; }</style>
@@ -17,10 +20,9 @@ export const LEAFLET_HTML = `<!DOCTYPE html>
 <div id="map"></div>
 <script>
   var map = L.map('map', { zoomControl: false }).setView([20, 0], 2);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    subdomains: 'abcd',
-    maxZoom: 20,
-    attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
   }).addTo(map);
   var line = L.polyline([], { color: '#FC4C02', weight: 5 }).addTo(map);
   var me = null;
