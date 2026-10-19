@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import type { RunMapProps } from './RunMap';
+import type { RunMapProps } from './RunMap.types';
 
 // react-native-maps has no web support; Metro picks this file on web instead of RunMap.tsx.
 export function RunMap({ style }: RunMapProps) {

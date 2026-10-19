@@ -1,51 +1,28 @@
-import { useEffect, useRef } from 'react';
-import type { StyleProp, ViewStyle } from 'react-native';
-import MapView, { Polyline } from 'react-native-maps';
+import { useEffect, useRef, useState } from 'react';
+import { WebView } from 'react-native-webview';
 
-import type { LatLng, RoutePoint } from '@/lib/types';
+import { LEAFLET_HTML, mapUpdateScript } from '@/lib/leafletMap';
 
-export type RunMapProps = {
-  route: RoutePoint[];
-  currentLocation: LatLng | null;
-  /** true: keep the camera on the runner. false: fit the whole route once. */
-  follow: boolean;
-  style?: StyleProp<ViewStyle>;
-};
+import type { RunMapProps } from './RunMap.types';
 
-const FOLLOW_DELTA = 0.005; // ~500 m across
-const toCoord = (p: LatLng) => ({ latitude: p.lat, longitude: p.lng });
-
+// Android: Leaflet + OpenStreetMap in a WebView, because Google Maps in Expo Go is broken (expo/expo#49323).
+// iOS uses RunMap.ios.tsx (Apple Maps), web uses RunMap.web.tsx.
 export function RunMap({ route, currentLocation, follow, style }: RunMapProps) {
-  const mapRef = useRef<MapView>(null);
+  const webRef = useRef<WebView>(null);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    if (!follow || !currentLocation) return;
-    mapRef.current?.animateToRegion(
-      { ...toCoord(currentLocation), latitudeDelta: FOLLOW_DELTA, longitudeDelta: FOLLOW_DELTA },
-      500,
-    );
-  }, [follow, currentLocation]);
-
-  const fitRoute = () => {
-    if (follow || route.length === 0) return;
-    if (route.length === 1) {
-      mapRef.current?.animateToRegion(
-        { ...toCoord(route[0]), latitudeDelta: FOLLOW_DELTA, longitudeDelta: FOLLOW_DELTA },
-        0,
-      );
-      return;
-    }
-    mapRef.current?.fitToCoordinates(route.map(toCoord), {
-      edgePadding: { top: 40, right: 40, bottom: 40, left: 40 },
-      animated: false,
-    });
-  };
+    if (!loaded) return;
+    webRef.current?.injectJavaScript(mapUpdateScript({ route, currentLocation, follow }));
+  }, [loaded, route, currentLocation, follow]);
 
   return (
-    <MapView ref={mapRef} style={style} showsUserLocation={follow} onMapReady={fitRoute}>
-      {route.length > 1 && (
-        <Polyline coordinates={route.map(toCoord)} strokeWidth={5} strokeColor="#FC4C02" />
-      )}
-    </MapView>
+    <WebView
+      ref={webRef}
+      style={style}
+      originWhitelist={['*']}
+      source={{ html: LEAFLET_HTML, baseUrl: 'https://localhost/' }}
+      onLoadEnd={() => setLoaded(true)}
+    />
   );
 }
